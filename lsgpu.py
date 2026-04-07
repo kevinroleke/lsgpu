@@ -392,6 +392,7 @@ def _spawn(spec: EntitySpec, cols: int, rows: int, phase: int = 0) -> Entity:
     )
 
 
+
 def _overlay(entities: list[Entity], tick: int) -> str:
     """Build a string of cursor-move + art sequences to stamp entities on screen."""
     buf: list[str] = []
@@ -674,12 +675,11 @@ def _temp_colour(t: int) -> str:
     return RED
 
 
-def render_card(gpu: GPUInfo, card_width: int, scan_row: int = -1) -> list[str]:
+def render_card(gpu: GPUInfo, card_width: int) -> list[str]:
     """
     Return a list of text lines representing one GPU card.
     Each line is exactly `card_width` visible characters wide
     (may contain ANSI escape sequences).
-    scan_row: which art row index to highlight as a scanline (-1 = none).
     """
     colour = VENDOR_COLOURS.get(gpu.vendor, WHITE)
     inner = card_width - 2  # subtract border chars
@@ -727,11 +727,7 @@ def render_card(gpu: GPUInfo, card_width: int, scan_row: int = -1) -> list[str]:
     for i, art_line in enumerate(art_lines):
         pad_left = max(0, (inner - art_w) // 2)
         clipped = art_line[:inner - pad_left]
-        if i == scan_row:
-            # scanline: reverse-video flash across this row
-            coloured = f"\033[7m{colour}{clipped}{RESET}"
-        else:
-            coloured = f"{colour}{clipped}{RESET}"
+        coloured = f"{colour}{clipped}{RESET}"
         lines.append(border_row(" " * pad_left + coloured))
 
     lines.append(border_row(f"{colour}{'─' * inner}{RESET}"))
@@ -811,13 +807,7 @@ def render_grid(gpus: list[GPUInfo], term_cols: int, frame: int = 0) -> str:
 
     cols, card_w = compute_grid(len(gpus), term_cols)
 
-    # Scanline sweeps through art rows, pauses, then repeats.
-    # Cycle: ART_ROWS rows × 4 frames each, then 16 frames of no highlight.
-    cycle = ART_ROWS * 4 + 16
-    phase = frame % cycle
-    scan_row = phase // 4 if phase < ART_ROWS * 4 else -1
-
-    rendered = [render_card(g, card_w, scan_row) for g in gpus]
+    rendered = [render_card(g, card_w) for g in gpus]
 
     output_lines: list[str] = []
 
@@ -936,7 +926,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec]) -> None:
                 + "\033[J"
                 + f"\033[{footer_row};1H"
                 + footer
-                + _overlay(entities, frame)   # stamp entities on top
+                + _overlay(entities, frame)   # entities float on top
             )
 
             sys.stdout.write(output.replace("\r\n", "\n").replace("\n", "\r\n"))
