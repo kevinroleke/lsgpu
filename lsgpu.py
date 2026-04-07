@@ -150,6 +150,45 @@ def rainbowize(text: str, offset: float = 0.0) -> str:
 
 # ── Themes ────────────────────────────────────────────────────────────────────
 
+def _rgb(r: int, g: int, b: int) -> str:
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+def _theme_walk(text: str, color_fn) -> str:
+    """
+    Walk rendered text, strip colour codes (preserve bold/dim/reverse),
+    and re-colour every non-space character using color_fn(col, row) -> str.
+    """
+    result: list[str] = []
+    row = col = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\033" and i + 1 < len(text) and text[i + 1] == "[":
+            m = _ANSI_RE.match(text, i)
+            if m:
+                inner = m.group()[2:-1]
+                kept = [p for p in inner.split(";") if p in ("1", "2", "7")]
+                if kept:
+                    result.append(f"\033[{';'.join(kept)}m")
+                i += len(m.group())
+            else:
+                result.append(ch)
+                i += 1
+        elif ch == "\n":
+            result.append(RESET + "\n")
+            row += 1
+            col = 0
+            i += 1
+        else:
+            if ch != " ":
+                result.append(color_fn(col, row))
+            result.append(ch)
+            col += 1
+            i += 1
+    return "".join(result)
+
+
 class Theme:
     """Base display theme. Subclass, set name, override apply(), add to THEME_REGISTRY."""
     name: str = "default"
@@ -168,45 +207,132 @@ class RainbowTheme(Theme):
 class MatrixTheme(Theme):
     """Digital-rain green; a band of bright columns sweeps across each frame."""
     name = "matrix"
-    _STRIDE = 19  # columns between bright bands
+    _STRIDE = 19
 
     def apply(self, text: str, frame: int) -> str:
         bright_base = (frame // 2) * 3
-        result: list[str] = []
-        col = 0
-        i = 0
-        while i < len(text):
-            ch = text[i]
-            if ch == "\033" and i + 1 < len(text) and text[i + 1] == "[":
-                m = _ANSI_RE.match(text, i)
-                if m:
-                    inner = m.group()[2:-1]
-                    kept = [p for p in inner.split(";") if p in ("1", "2", "7")]
-                    if kept:
-                        result.append(f"\033[{';'.join(kept)}m")
-                    i += len(m.group())
-                else:
-                    result.append(ch)
-                    i += 1
-            elif ch == "\n":
-                result.append(RESET + "\n")
-                col = 0
-                i += 1
+        stride = self._STRIDE
+        def color(col, row):
+            if ((col - bright_base) % stride) < 2:
+                return "\033[1m" + _rgb(0, 255, 65)
+            return _rgb(0, 185, 45)
+        return _theme_walk(text, color)
+
+
+class FourTwentyTheme(Theme):
+    """Cannabis greens and purples rolling in a slow haze."""
+    name = "420"
+
+    def apply(self, text: str, frame: int) -> str:
+        def color(col, row):
+            p = (col * 3 + row * 6 + frame) % 80
+            if p < 50:
+                g = 130 + int(p * 2.5)
+                return _rgb(25, g, 45)
             else:
-                if ch != " ":
-                    bright = ((col - bright_base) % self._STRIDE) < 2
-                    if bright:
-                        result.append("\033[1m\033[38;2;0;255;65m")
-                    else:
-                        result.append("\033[38;2;0;185;45m")
-                result.append(ch)
-                col += 1
-                i += 1
-        return "".join(result)
+                v = 80 + int((p - 50) * 3.5)
+                return _rgb(v, 10, v + 55)
+        return _theme_walk(text, color)
+
+
+class AmericaTheme(Theme):
+    """Red, white, and blue horizontal stripes that slowly scroll."""
+    name = "america"
+    _RED  = _rgb(178, 34,  52)   # Old Glory Red
+    _BLUE = _rgb(60,  59, 110)   # Old Glory Blue
+    # white rows use RESET so they show in the terminal's own foreground colour
+
+    def apply(self, text: str, frame: int) -> str:
+        red, blue = self._RED, self._BLUE
+        shift = frame // 8
+        def color(col, row):
+            s = (row + shift) % 3
+            if s == 0: return red
+            if s == 2: return blue
+            return RESET     # middle stripe: terminal default = readable on any bg
+        return _theme_walk(text, color)
+
+
+class ChinaTheme(Theme):
+    """Red field with golden columns shifting across like scattered stars."""
+    name = "china"
+    _RED  = _rgb(222, 41,  16)
+    _GOLD = _rgb(255, 215,  0)
+
+    def apply(self, text: str, frame: int) -> str:
+        gold_col = (frame // 3) % 20
+        red, gold = self._RED, self._GOLD
+        def color(col, row):
+            return gold if col % 20 == gold_col else red
+        return _theme_walk(text, color)
+
+
+class CanadaTheme(Theme):
+    """Red side-stripes with a neutral centre, like the maple-leaf flag."""
+    name = "canada"
+    _RED = _rgb(255, 0, 28)
+
+    def apply(self, text: str, frame: int) -> str:
+        red = self._RED
+        def color(col, row):
+            # 1:2:1 proportions — every 40 cols: 10 red | 20 default | 10 red
+            band = (col // 10) % 4
+            return red if band in (0, 3) else RESET
+        return _theme_walk(text, color)
+
+
+class IsraelTheme(Theme):
+    """Blue stripes top and bottom with a neutral centre, like the Israeli flag."""
+    name = "israel"
+    _BLUE = _rgb(0, 56, 184)
+
+    def apply(self, text: str, frame: int) -> str:
+        blue = self._BLUE
+        def color(col, row):
+            r = row % 9
+            return blue if (r < 2 or r >= 7) else RESET
+        return _theme_walk(text, color)
+
+
+class ChristmasTheme(Theme):
+    """Festive red and green with occasional gold sparkles."""
+    name = "christmas"
+    _RED   = _rgb(220,  20,  60)
+    _GREEN = _rgb(0,   154,  23)
+    _GOLD  = _rgb(255, 215,   0)
+
+    def apply(self, text: str, frame: int) -> str:
+        red, green, gold = self._RED, self._GREEN, self._GOLD
+        def color(col, row):
+            if (col + row * 3 + frame // 4) % 22 == 0:
+                return gold
+            return red if (col + row) % 4 < 2 else green
+        return _theme_walk(text, color)
+
+
+class HalloweenTheme(Theme):
+    """Spooky orange and purple with flickers of ghostly yellow."""
+    name = "halloween"
+    _ORANGE = _rgb(255, 102,   0)
+    _PURPLE = _rgb(102,   0, 153)
+    _YELLOW = _rgb(255, 230,   0)
+
+    def apply(self, text: str, frame: int) -> str:
+        orange, purple, yellow = self._ORANGE, self._PURPLE, self._YELLOW
+        def color(col, row):
+            p = (col * 2 + row * 3 + frame) % 14
+            if p == 0:
+                return yellow
+            return orange if p < 7 else purple
+        return _theme_walk(text, color)
 
 
 THEME_REGISTRY: dict[str, Theme] = {
-    t.name: t for t in (Theme(), RainbowTheme(), MatrixTheme())
+    t.name: t for t in (
+        Theme(), RainbowTheme(), MatrixTheme(), FourTwentyTheme(),
+        AmericaTheme(), ChinaTheme(), CanadaTheme(), IsraelTheme(),
+        ChristmasTheme(), HalloweenTheme(),
+    )
 }
 
 
