@@ -324,13 +324,85 @@ def render_header(gpus: list[GPUInfo], term_cols: int, frame: int = 0) -> str:
 def render_footer(term_cols: int, last_poll_ago: float) -> str:
     body = (f" {GREEN}●{RESET} {BOLD}LIVE{RESET}  "
             f"updated {last_poll_ago:.1f}s ago   "
-            f"{DIM}[q / ESC / Ctrl-C]{RESET} quit ")
+            f"{DIM}[q]{RESET} quit  {DIM}[/]{RESET} command ")
     pad  = max(0, term_cols - len(strip_ansi(body)))
     line = "─" * term_cols
     return f"{CYAN}{line}{RESET}\n{body}{' ' * pad}\n"
 
 
+def render_cmd_footer(term_cols: int, cmd_buf: str, error: str = "") -> str:
+    line = f"{CYAN}{'─' * term_cols}{RESET}"
+    if error:
+        body = f" {RED}✗ {error}{RESET}"
+    else:
+        body = f" {CYAN}/{cmd_buf}█{RESET}"
+    pad = max(0, term_cols - len(strip_ansi(body)))
+    return f"{line}\n{body}{' ' * pad}\n"
+
+
 # ── TUI ───────────────────────────────────────────────────────────────────────
+
+def execute_command(
+    cmd: str,
+    theme: Theme,
+    entities: list[Entity],
+    entity_specs: list[EntitySpec],
+    term_cols: int,
+    term_lines: int,
+) -> "tuple[Theme, list[Entity], list[EntitySpec]] | str":
+    """Parse and execute a TUI command. Returns updated state tuple or error string."""
+    parts = cmd.split()
+    if not parts:
+        return (theme, entities, entity_specs)
+    name = parts[0].lower()
+
+    if name == "change-theme":
+        if len(parts) < 2:
+            return f"usage: change-theme <name>  known: {', '.join(THEME_REGISTRY)}"
+        t = parts[1]
+        if t not in THEME_REGISTRY:
+            return f"unknown theme {t!r}  known: {', '.join(THEME_REGISTRY)}"
+        return (THEME_REGISTRY[t], entities, entity_specs)
+
+    elif name == "change-theme-random":
+        return (random.choice(list(THEME_REGISTRY.values())), entities, entity_specs)
+
+    elif name == "killall":
+        return (theme, [], [])
+
+    elif name == "kill":
+        if len(parts) < 2:
+            return "usage: kill <entity-name>"
+        target = parts[1]
+        new_ents  = [e for e in entities     if e.spec.name != target]
+        new_specs = [s for s in entity_specs if s.name      != target]
+        if len(new_ents) == len(entities):
+            return f"no live entity named {target!r}"
+        return (theme, new_ents, new_specs)
+
+    elif name == "spawn":
+        if len(parts) < 2:
+            return f"usage: spawn <entity> [qty]  known: {', '.join(ENTITY_REGISTRY)}"
+        ent_name = parts[1]
+        if ent_name not in ENTITY_REGISTRY:
+            return f"unknown entity {ent_name!r}  known: {', '.join(ENTITY_REGISTRY)}"
+        qty = 1
+        if len(parts) >= 3:
+            try:
+                qty = max(1, int(parts[2]))
+            except ValueError:
+                return f"invalid quantity {parts[2]!r}"
+        spec = ENTITY_REGISTRY[ent_name]
+        new_ents  = entities + [
+            spawn(spec, term_cols, term_lines, phase=i * 7) for i in range(qty)
+        ]
+        new_specs = entity_specs + [spec] * qty
+        return (theme, new_ents, new_specs)
+
+    else:
+        return (f"unknown command {name!r}  "
+                "try: change-theme, change-theme-random, killall, kill, spawn")
+
 
 def _read_key(timeout: float) -> str:
     if not select.select([sys.stdin], [], [], timeout)[0]:
@@ -350,11 +422,14 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec]) -> None:
     sys.stdout.flush()
     signal.signal(signal.SIGWINCH, lambda *_: None)
 
-    frame    = 0
+    frame     = 0
     gpus: list[GPUInfo]    = []
     entities: list[Entity] = []
     last_poll = 0.0
     spawned   = False
+    cmd_mode  = False
+    cmd_buf   = ""
+    cmd_error = ""
 
     try:
         tty.setraw(fd)
@@ -374,7 +449,10 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec]) -> None:
             poll_age = time.monotonic() - last_poll
             header   = theme.apply(render_header(gpus, term.columns, frame), frame)
             grid     = theme.apply(render_grid(gpus,   term.columns, frame), frame)
-            footer   = theme.apply(render_footer(term.columns, poll_age),    frame)
+            if cmd_mode:
+                footer = render_cmd_footer(term.columns, cmd_buf, cmd_error)
+            else:
+                footer = theme.apply(render_footer(term.columns, poll_age), frame)
 
             output = (
                 "\033[H"
@@ -391,8 +469,42 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec]) -> None:
                 e.tick(term.columns, term.lines)
             frame += 1
 
-            if _read_key(1.0 / FPS) in ("q", "Q", "\x03", "\x1b"):
-                break
+            ch = _read_key(1.0 / FPS)
+
+            if cmd_mode:
+                if ch in ("\r", "\n"):              # Enter — execute
+                    result = execute_command(
+                        cmd_buf.strip(), theme, entities, entity_specs,
+                        term.columns, term.lines,
+                    )
+                    if isinstance(result, str):     # error message
+                        cmd_error = result
+                        cmd_buf   = ""
+                    else:
+                        theme, entities, entity_specs = result
+                        cmd_mode  = False
+                        cmd_buf   = ""
+                        cmd_error = ""
+                elif ch == "\x1b":                  # Escape — cancel
+                    cmd_mode  = False
+                    cmd_buf   = ""
+                    cmd_error = ""
+                elif ch in ("\x7f", "\x08"):        # Backspace
+                    cmd_buf   = cmd_buf[:-1]
+                    cmd_error = ""
+                elif ch == "\x15":                  # Ctrl-U — clear line
+                    cmd_buf   = ""
+                    cmd_error = ""
+                elif ch and ch.isprintable():
+                    cmd_buf  += ch
+                    cmd_error = ""
+            else:
+                if ch in ("q", "Q", "\x03", "\x1b"):
+                    break
+                elif ch == "/":
+                    cmd_mode  = True
+                    cmd_buf   = ""
+                    cmd_error = ""
 
     except KeyboardInterrupt:
         pass
