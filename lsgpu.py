@@ -98,19 +98,20 @@ def _hsv_to_rgb(h: float) -> tuple[int, int, int]:
     return int(r * 255), int(g * 255), int(b * 255)
 
 
-def _rainbow_esc(col: int, row: int) -> str:
+def _rainbow_esc(col: int, row: int, offset: float = 0.0) -> str:
     """24-bit foreground colour cycling diagonally through the rainbow."""
-    hue = (col * 4 + row * 8) % 360
+    hue = (col * 4 + row * 8 + offset) % 360
     r, g, b = _hsv_to_rgb(hue)
     return f"\033[38;2;{r};{g};{b}m"
 
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
-def rainbowize(text: str) -> str:
+def rainbowize(text: str, offset: float = 0.0) -> str:
     """
     Strip all colour codes from text and re-paint every non-space
     character with a position-based rainbow colour.
+    offset shifts the hue globally so callers can animate it over time.
     Non-colour attributes (bold, dim, reset) are preserved.
     """
     result: list[str] = []
@@ -139,7 +140,7 @@ def rainbowize(text: str) -> str:
             i += 1
         else:
             if ch != " ":
-                result.append(_rainbow_esc(col, row))
+                result.append(_rainbow_esc(col, row, offset))
             result.append(ch)
             col += 1
             i += 1
@@ -572,9 +573,11 @@ def run_tui(rainbow: bool) -> None:
             footer = render_footer(term.columns, poll_age)
 
             if rainbow:
-                header = rainbowize(header)
-                grid   = rainbowize(grid)
-                footer = rainbowize(footer)
+                # Shift hue by 3° per frame → full cycle every 120 frames (~10 s)
+                hue_offset = frame * 3.0
+                header = rainbowize(header, hue_offset)
+                grid   = rainbowize(grid,   hue_offset)
+                footer = rainbowize(footer, hue_offset)
 
             main_block = header + grid
 
