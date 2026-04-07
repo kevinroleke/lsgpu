@@ -13,10 +13,11 @@ import urllib.request
 import webbrowser
 from typing import Optional
 
-REDIRECT_URI  = "http://127.0.0.1:8888/callback"
-SCOPES        = "user-read-currently-playing user-read-playback-state"
-TOKEN_FILE    = os.path.expanduser("~/.config/lsgpu/spotify.json")
-POLL_INTERVAL = 5   # seconds between /currently-playing API calls
+REDIRECT_URI       = "http://127.0.0.1:8888/callback"
+SCOPES             = "user-read-currently-playing user-read-playback-state"
+TOKEN_FILE         = os.path.expanduser("~/.config/lsgpu/spotify.json")
+POLL_INTERVAL      = 5   # seconds between /currently-playing API calls
+_DEFAULT_CLIENT_ID = "493c84a2c4bc420e944a19112158402c"
 
 
 class SpotifyClient:
@@ -24,7 +25,7 @@ class SpotifyClient:
         self.access_token:  Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.expires_at:    float         = 0.0
-        self.client_id:     str           = os.getenv("SPOTIFY_CLIENT_ID", "")
+        self.client_id:     str           = os.getenv("SPOTIFY_CLIENT_ID", _DEFAULT_CLIENT_ID)
         self._load()
 
     # ── status ────────────────────────────────────────────────────────────────
@@ -41,14 +42,6 @@ class SpotifyClient:
         Blocks until the user authorises in browser (or 120 s timeout).
         Returns (success, message).
         """
-        if not self.client_id:
-            return False, (
-                "No Spotify Client ID.\n"
-                "  1. Visit https://developer.spotify.com/dashboard\n"
-                "  2. Create an app, add redirect URI:  " + REDIRECT_URI + "\n"
-                "  3. Set env var:  export SPOTIFY_CLIENT_ID=<your-id>"
-            )
-
         verifier  = secrets.token_urlsafe(64)
         challenge = (
             base64.urlsafe_b64encode(

@@ -332,58 +332,93 @@ def render_footer(term_cols: int, last_poll_ago: float) -> str:
     return f"{CYAN}{line}{RESET}\n{body}{' ' * pad}\n"
 
 
+_SPOTIFY_LOGO = [
+    r"   ,---,  ",
+    r"  ( ))) ) ",
+    r"  ( ))  ) ",
+    r"  ( )   ) ",
+    r"   '---'  ",
+]
+_LOGO_W = max(len(l) for l in _SPOTIFY_LOGO)  # 10
+
+
 def render_spotify_widget(
     track: "dict | None",
     connected: bool,
     term_cols: int,
 ) -> str:
     colour = GREEN
-    width  = min(54, term_cols)
+    width  = min(62, max(44, term_cols - 2))
     inner  = width - 2
 
-    def top():
-        return f"{colour}╔{'═' * inner}╗{RESET}"
-    def bot():
-        return f"{colour}╚{'═' * inner}╝{RESET}"
-    def row(content: str):
-        vis = len(strip_ansi(content))
-        pad = max(0, inner - vis)
-        return f"{colour}║{RESET}{content[:inner]}{' ' * pad}{colour}║{RESET}"
+    def _t(s: str, max_len: int) -> str:
+        """Truncate plain string to max_len visible chars."""
+        return s if len(s) <= max_len else s[:max_len - 1] + "…"
 
-    lines = [top(), row(f" {GREEN}♫  SPOTIFY{RESET}"),
-             row(f"{colour}{'─' * inner}{RESET}")]
+    def top():  return f"{colour}╔{'═' * inner}╗{RESET}"
+    def bot():  return f"{colour}╚{'═' * inner}╝{RESET}"
+    def sep():  return f"{colour}╠{'═' * inner}╣{RESET}"
 
+    def row(plain: str, colored: str = ""):
+        """plain = visible text for width calc; colored = what to actually emit."""
+        pad  = max(0, inner - len(plain))
+        body = colored if colored else plain
+        return f"{colour}║{RESET}{body}{' ' * pad}{colour}║{RESET}"
+
+    lines = [top()]
+
+    # ── logo + title header ───────────────────────────────────────────────────
+    title_col   = _LOGO_W + 2          # column where "SPOTIFY" starts
+    right_space = inner - title_col
+    for i, logo_line in enumerate(_SPOTIFY_LOGO):
+        if i == 1:
+            label_plain  = " SPOTIFY"
+            label_colored = f" {BOLD}SPOTIFY{RESET}"
+        elif i == 2:
+            label_plain  = " Now Playing"
+            label_colored = f" {DIM}Now Playing{RESET}"
+        else:
+            label_plain = label_colored = ""
+        plain   = logo_line + label_plain
+        colored = f"{GREEN}{logo_line}{RESET}" + label_colored
+        lines.append(row(plain, colored))
+
+    lines.append(sep())
+
+    # ── content ───────────────────────────────────────────────────────────────
     if not connected:
-        lines += [
-            row(f"  {DIM}Not connected{RESET}"),
-            row(f"  {DIM}Use /connect-spotify to authenticate{RESET}"),
-        ]
+        lines.append(row("  Not connected",
+                         f"  {DIM}Not connected{RESET}"))
+        lines.append(row("  Use /connect-spotify to authenticate",
+                         f"  {DIM}Use /connect-spotify to authenticate{RESET}"))
     elif track is None:
-        lines.append(row(f"  {DIM}Nothing playing{RESET}"))
+        lines.append(row("  Nothing playing",
+                         f"  {DIM}Nothing playing{RESET}"))
     else:
-        title  = track["title"]
-        artist = track["artist"]
-        album  = track["album"]
+        status = "▶" if track["is_playing"] else "⏸"
+        title  = _t(track["title"],  inner - 5)
+        artist = _t(track["artist"], inner - 3)
+        album  = _t(track["album"],  inner - 3)
         prog   = track["progress_ms"]
         dur    = track["duration_ms"]
 
-        max_t = inner - 3
-        if len(title)  > max_t: title  = title[:max_t - 1]  + "…"
-        if len(artist) > max_t: artist = artist[:max_t - 1] + "…"
-        if len(album)  > max_t: album  = album[:max_t - 1]  + "…"
-
-        status = "▶" if track["is_playing"] else "⏸"
-        lines.append(row(f"  {BOLD}{status} {title}{RESET}"))
-        lines.append(row(f"  {DIM}{artist}{RESET}"))
+        lines.append(row(f"  {status} {title}",
+                         f"  {GREEN}{status}{RESET} {BOLD}{title}{RESET}"))
+        lines.append(row(f"  {artist}",
+                         f"  {DIM}{artist}{RESET}"))
         if album:
-            lines.append(row(f"  {DIM}{album}{RESET}"))
+            lines.append(row(f"  {album}",
+                             f"  {DIM}{album}{RESET}"))
 
-        bar_w   = max(4, inner - 16)
-        filled  = int((prog / dur) * bar_w)
-        bar     = f"{GREEN}{'█' * filled}{'░' * (bar_w - filled)}{RESET}"
-        p_str   = f"{prog // 60000}:{(prog // 1000) % 60:02d}"
-        d_str   = f"{dur  // 60000}:{(dur  // 1000) % 60:02d}"
-        lines.append(row(f"  {bar} {DIM}{p_str}/{d_str}{RESET}"))
+        p_str  = f"{prog // 60000}:{(prog // 1000) % 60:02d}"
+        d_str  = f"{dur  // 60000}:{(dur  // 1000) % 60:02d}"
+        time_s = f"{p_str}/{d_str}"
+        bar_w  = max(4, inner - len(time_s) - 5)
+        filled = int((prog / dur) * bar_w)
+        lines.append(row(
+            f"  {'█' * filled}{'░' * (bar_w - filled)} {time_s}",
+            f"  {GREEN}{'█' * filled}{'░' * (bar_w - filled)}{RESET} {DIM}{time_s}{RESET}",
+        ))
 
     lines.append(bot())
     return "\n".join(lines) + "\n"
