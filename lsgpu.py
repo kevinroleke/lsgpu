@@ -27,13 +27,11 @@ from weather import WeatherPoller, render_weather_widget
 from eightball import random_response, render_eightball_widget, render_eightball_overlay
 import game_wordle
 import game_snake
-import game_dino
 import game_roulette
 
 _GAMES = {
     "wordle":   game_wordle.play,
     "snake":    game_snake.play,
-    "dino":     game_dino.play,
     "roulette": game_roulette.play,
 }
 
@@ -454,6 +452,156 @@ def render_cmd_footer(term_cols: int, cmd_buf: str, error: str = "") -> str:
     return f"{line}\n{body}{' ' * pad}\n"
 
 
+# ── Keybind key-string parser ─────────────────────────────────────────────────
+
+def _parse_key_str(s: str) -> "str | None":
+    """
+    Convert a human-readable key descriptor to the character(s) _read_key returns.
+    Examples: "ctrl+g" → "\x07", "G" → "G", "space" → " ".
+    Angle brackets are stripped automatically.
+    """
+    s = s.strip("<>").lower()
+    if s.startswith("ctrl+") or s.startswith("ctrl-"):
+        ch = s[5:]
+        if len(ch) == 1 and "a" <= ch <= "z":
+            return chr(ord(ch) - ord("a") + 1)
+        return None
+    named = {"space": " ", "enter": "\r", "return": "\r", "tab": "\t",
+             "esc": "\x1b", "escape": "\x1b", "del": "\x7f", "backspace": "\x7f"}
+    if s in named:
+        return named[s]
+    raw = s.upper() if len(s) == 1 else s
+    return raw if len(raw) == 1 else None
+
+
+# ── Help overlay ──────────────────────────────────────────────────────────────
+
+def render_help_overlay(term_cols: int, term_lines: int,
+                        keybinds: "dict[str, str]") -> str:
+    colour  = CYAN
+    width   = min(72, max(54, term_cols - 4))
+    inner   = width - 2
+    start_c = max(1, (term_cols - width) // 2 + 1)
+
+    def go(r: int) -> str:
+        return f"\033[{r};{start_c}H"
+
+    def hline() -> str:
+        return f"{colour}╠{'═' * inner}╣{RESET}"
+
+    def row(plain: str, colored: str = "") -> str:
+        """plain must be pure text (no ANSI) — used only for width calc."""
+        pad  = max(0, inner - len(plain))
+        body = colored if colored else plain
+        return f"{colour}║{RESET}{body}{' ' * pad}{colour}║{RESET}"
+
+    def section(label: str) -> str:
+        return row(f" {label}", f" {DIM}{label}{RESET}")
+
+    def _wrap_items(prefix: str, items: list[str], avail: int) -> list[str]:
+        """Wrap a comma-separated list of items to fit within avail chars."""
+        out_lines: list[str] = []
+        cur = prefix
+        indent = " " * len(prefix)
+        for i, item in enumerate(items):
+            sep = ", " if i < len(items) - 1 else ""
+            candidate = cur + item + sep
+            if len(candidate) > avail and cur != prefix and cur != indent:
+                out_lines.append(cur.rstrip(", "))
+                cur = indent + item + sep
+            else:
+                cur = candidate
+        if cur.strip():
+            out_lines.append(cur)
+        return out_lines
+
+    _CMD_HELP = [
+        ("change-theme <name>",    "switch colour theme"),
+        ("change-theme-random",    "random theme"),
+        ("spawn <entity> [n]",     "spawn bouncing entity"),
+        ("kill <entity>",          "remove entity by name"),
+        ("killall",                "remove all entities"),
+        ("fire on|off",            "fire animation"),
+        ("spotify on|off",         "Spotify now-playing widget"),
+        ("connect-spotify",        "OAuth login for Spotify"),
+        ("sysinfo on|off",         "CPU/memory widget"),
+        ("weather on|off",         "weather widget (Rochester NY)"),
+        ("eightball on|off",       "Magic 8-ball widget"),
+        ("8ball [question]",       "shake the 8-ball"),
+        ("play <game>",            "launch a game"),
+        ("keybind <key> <cmd…>",   "bind a key to a command"),
+        ("help",                   "show this screen"),
+    ]
+    col_w = max(len(c) for c, _ in _CMD_HELP) + 2   # cmd column width
+
+    lines: list[str] = []
+    lines.append(f"{colour}╔{'═' * inner}╗{RESET}")
+    lines.append(row(" lsgpu — command reference",
+                     f" {BOLD}lsgpu{RESET} — command reference"))
+    lines.append(hline())
+
+    # ── Navigation ────────────────────────────────────────────────────────────
+    lines.append(section("Navigation"))
+    lines.append(row("  q / ESC          quit lsgpu",
+                     f"  {BOLD}q / ESC{RESET}          quit lsgpu"))
+    lines.append(row("  /                open command prompt",
+                     f"  {BOLD}/{RESET}                open command prompt"))
+    lines.append(hline())
+
+    # ── Commands ──────────────────────────────────────────────────────────────
+    lines.append(section("Commands  (/ then Enter)"))
+    for cmd, desc in _CMD_HELP:
+        plain   = f"  {cmd:<{col_w}}{desc}"
+        colored = f"  {BOLD}{cmd:<{col_w}}{RESET}{DIM}{desc}{RESET}"
+        lines.append(row(plain, colored))
+    lines.append(hline())
+
+    # ── Games ─────────────────────────────────────────────────────────────────
+    lines.append(section("Games  (/play <name>)"))
+    for game_name in _GAMES:
+        lines.append(row(f"  {game_name}", f"  {CYAN}{game_name}{RESET}"))
+    lines.append(hline())
+
+    # ── Keybinds ──────────────────────────────────────────────────────────────
+    lines.append(section("Keybinds  (/keybind <key> <cmd…>)"))
+    if keybinds:
+        for key_ch, cmd_str in keybinds.items():
+            if ord(key_ch) < 27:
+                key_label = f"ctrl+{chr(ord(key_ch) + ord('a') - 1)}"
+            else:
+                key_label = repr(key_ch).strip("'")
+            trunc = cmd_str[:inner - 18] + "…" if len(cmd_str) > inner - 18 else cmd_str
+            plain   = f"  {key_label:<14}→  {trunc}"
+            colored = f"  {CYAN}{key_label:<14}{RESET}→  {DIM}{trunc}{RESET}"
+            lines.append(row(plain, colored))
+    else:
+        lines.append(row("  (none)", f"  {DIM}(none){RESET}"))
+    lines.append(hline())
+
+    # ── Themes & Entities (wrapped) ───────────────────────────────────────────
+    lines.append(section("Themes"))
+    for wl in _wrap_items("  ", list(THEME_REGISTRY), inner):
+        lines.append(row(wl, f"  {DIM}{wl.strip()}{RESET}"))
+
+    lines.append(section("Entities"))
+    for wl in _wrap_items("  ", list(ENTITY_REGISTRY), inner):
+        lines.append(row(wl, f"  {DIM}{wl.strip()}{RESET}"))
+
+    lines.append(f"{colour}╚{'═' * inner}╝{RESET}")
+
+    # ── assemble with cursor positioning ─────────────────────────────────────
+    box_height = len(lines)
+    start_r    = max(1, (term_lines - box_height - 1) // 2 + 1)
+
+    out: list[str] = []
+    for i, ln in enumerate(lines):
+        out.append(go(start_r + i) + ln)
+    hint    = " Press any key to close "
+    hint_col = max(1, (term_cols - len(hint)) // 2 + 1)
+    out.append(f"\033[{start_r + box_height};{hint_col}H{DIM}{hint}{RESET}")
+    return "".join(out)
+
+
 # ── Fire effect ───────────────────────────────────────────────────────────────
 
 FIRE_ROWS   = 5          # terminal rows consumed at the bottom of the screen
@@ -639,10 +787,23 @@ def execute_command(
             return f"unknown game {game!r}  known: {', '.join(_GAMES)}"
         return ("__PLAY__", game)
 
+    elif name == "help":
+        return "__HELP__"
+
+    elif name == "keybind":
+        if len(parts) < 3:
+            return "usage: keybind <key> <command…>  e.g. keybind ctrl+g spawn scrooge"
+        key_ch = _parse_key_str(parts[1])
+        if key_ch is None:
+            return f"unrecognised key {parts[1]!r}  try: ctrl+a … ctrl+z, or a single char"
+        bound_cmd = " ".join(parts[2:])
+        return ("__KEYBIND__", key_ch, bound_cmd)
+
     else:
         return (f"unknown command {name!r}  "
-                "try: change-theme, change-theme-random, killall, kill, spawn, "
-                "fire, spotify, connect-spotify, sysinfo, weather, eightball, 8ball, play")
+                "try: help, change-theme, change-theme-random, killall, kill, spawn, "
+                "fire, spotify, connect-spotify, sysinfo, weather, eightball, 8ball, "
+                "play, keybind")
 
 
 def _read_key(fd: int, timeout: float) -> str:
@@ -703,6 +864,8 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
     eightball_response: "tuple[str, str] | None" = None
     eightball_question: str = ""
     eightball_flash: int = 0
+    show_help: bool = False
+    _keybinds: dict[str, str] = {}
 
     def _ensure_poller():
         nonlocal spotify_poller
@@ -816,6 +979,10 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     term.columns, term.lines,
                 ))
                 eightball_flash -= 1
+            if show_help:
+                sys.stdout.write(render_help_overlay(
+                    term.columns, term.lines, _keybinds,
+                ))
             sys.stdout.flush()
 
             for e in entities:
@@ -842,6 +1009,15 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                         _tui_enter(fd)
                         cmd_mode = False
                         cmd_buf  = cmd_error = ""
+                    elif result == "__HELP__":
+                        show_help = True
+                        cmd_mode  = False
+                        cmd_buf   = cmd_error = ""
+                    elif isinstance(result, tuple) and result[0] == "__KEYBIND__":
+                        _, key_ch, bound_cmd = result
+                        _keybinds[key_ch] = bound_cmd
+                        cmd_mode  = False
+                        cmd_buf   = cmd_error = ""
                     elif isinstance(result, tuple) and result[0] == "__PLAY__":
                         _, game_name = result
                         # Hand off to the game; it runs until it returns
@@ -885,11 +1061,46 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     cmd_buf  += ch
                     cmd_error = ""
             else:
-                if ch in ("q", "Q", "\x03", "\x1b"):
+                if show_help:
+                    # A real keypress (not a timeout) dismisses the help overlay
+                    if ch:
+                        show_help = False
+                elif ch in ("q", "Q", "\x03", "\x1b"):
                     break
                 elif ch == "/":
                     cmd_mode = True
                     cmd_buf  = cmd_error = ""
+                elif ch in _keybinds:
+                    result = execute_command(
+                        _keybinds[ch], theme, entities, entity_specs,
+                        fire_enabled, spotify_enabled,
+                        sysinfo_enabled, weather_enabled, eightball_enabled,
+                        term.columns, term.lines,
+                    )
+                    if result == "__HELP__":
+                        show_help = True
+                    elif isinstance(result, tuple) and result[0] == "__KEYBIND__":
+                        _, key_ch2, bound_cmd2 = result
+                        _keybinds[key_ch2] = bound_cmd2
+                    elif isinstance(result, tuple) and result[0] == "__PLAY__":
+                        _, game_name = result
+                        sys.stdout.write("\033[2J\033[H")
+                        sys.stdout.flush()
+                        _GAMES[game_name](fd, term.columns, term.lines)
+                        sys.stdout.write("\033[2J\033[H")
+                        sys.stdout.flush()
+                        spawned = False
+                    elif isinstance(result, tuple) and result[0] == "__8BALL__":
+                        _, eightball_question, eightball_response = result
+                        eightball_flash   = 36
+                        eightball_enabled = True
+                    elif not isinstance(result, str):
+                        (theme, entities, entity_specs,
+                         fire_enabled, spotify_enabled,
+                         sysinfo_enabled, weather_enabled, eightball_enabled) = result
+                        if fire_enabled and (not fire_buf or fire_width != term.columns):
+                            fire_buf   = fire_init(term.columns)
+                            fire_width = term.columns
 
     except KeyboardInterrupt:
         pass
@@ -908,7 +1119,9 @@ def main() -> None:
         description="List connected GPUs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=("themes:   " + ", ".join(THEME_REGISTRY) + "\n"
-                "entities: " + ", ".join(ENTITY_REGISTRY)),
+                "entities: " + ", ".join(ENTITY_REGISTRY) + "\n"
+                "games:    " + ", ".join(_GAMES) + "\n\n"
+                "TUI keys: / → command prompt   q → quit   /help → command list"),
     )
     parser.add_argument("--theme", default="default", metavar="NAME",
                         help="display theme (default: default)")
@@ -928,6 +1141,8 @@ def main() -> None:
                         help="show weather widget for Rochester, NY")
     parser.add_argument("--eightball", action="store_true",
                         help="show Magic 8-ball widget")
+    parser.add_argument("--play", metavar="GAME", default="",
+                        help=f"jump straight into a game: {', '.join(_GAMES)}")
     args = parser.parse_args()
 
     theme = THEME_REGISTRY.get(args.theme)
@@ -949,6 +1164,23 @@ def main() -> None:
         ok, msg = SpotifyClient().connect()
         print(msg)
         sys.exit(0 if ok else 1)
+
+    if args.play:
+        game = args.play.lower()
+        if game not in _GAMES:
+            parser.error(f"unknown game {game!r}. known: {', '.join(_GAMES)}")
+        if sys.stdout.isatty():
+            fd  = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            _tui_enter(fd)
+            try:
+                term = shutil.get_terminal_size()
+                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.flush()
+                _GAMES[game](fd, term.columns, term.lines)
+            finally:
+                _tui_exit(fd, old)
+        sys.exit(0)
 
     if sys.stdout.isatty():
         run_tui(theme, entity_specs,
