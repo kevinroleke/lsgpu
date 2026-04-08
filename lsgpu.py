@@ -470,8 +470,8 @@ def _parse_key_str(s: str) -> "str | None":
              "esc": "\x1b", "escape": "\x1b", "del": "\x7f", "backspace": "\x7f"}
     if s in named:
         return named[s]
-    raw = s.upper() if len(s) == 1 else s
-    return raw if len(raw) == 1 else None
+    # s is already lowercased; return as-is so it matches _read_key output
+    return s if len(s) == 1 else None
 
 
 # ── Help overlay ──────────────────────────────────────────────────────────────
