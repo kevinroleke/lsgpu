@@ -332,14 +332,17 @@ def render_footer(term_cols: int, last_poll_ago: float) -> str:
     return f"{CYAN}{line}{RESET}\n{body}{' ' * pad}\n"
 
 
-_SPOTIFY_LOGO = [
-    r"   ,---,  ",
-    r"  ( ))) ) ",
-    r"  ( ))  ) ",
-    r"  ( )   ) ",
-    r"   '---'  ",
+_SPOTIFY_BRAILLE = [
+    "⠀⠀⣀⣴⣶⣾⣿⣷⣶⣦⣀⠀⠀",
+    "⢀⣼⣿⠿⠿⠿⠿⠿⣿⣿⣿⣧⡀",
+    "⣸⣿⣧⣶⠶⠶⠶⣶⣤⣌⣙⣿⣇",
+    "⢿⣿⣿⣶⠶⠶⠶⣶⣤⣍⣿⣿⡿",
+    "⠸⣿⣿⣶⣶⣿⣷⣶⣮⣽⣿⣿⠇",
+    "⠀⠘⠿⣿⣿⣿⣿⣿⣿⣿⠿⠃⠀",
+    "⠀⠀⠀⠈⠉⠙⠛⠋⠉⠁⠀⠀⠀",
 ]
-_LOGO_W = max(len(l) for l in _SPOTIFY_LOGO)  # 10
+_BRAILLE_W = 13                    # visible cols per logo row
+_LEFT_COL  = _BRAILLE_W + 2       # 15: 1 margin + 13 logo + 1 gap
 
 
 def render_spotify_widget(
@@ -347,78 +350,81 @@ def render_spotify_widget(
     connected: bool,
     term_cols: int,
 ) -> str:
-    colour = GREEN
-    width  = min(62, max(44, term_cols - 2))
-    inner  = width - 2
+    colour  = GREEN
+    width   = min(72, max(52, term_cols - 2))
+    inner   = width - 2
+    right_w = inner - _LEFT_COL    # chars available for track info column
 
     def _t(s: str, max_len: int) -> str:
-        """Truncate plain string to max_len visible chars."""
         return s if len(s) <= max_len else s[:max_len - 1] + "…"
 
-    def top():  return f"{colour}╔{'═' * inner}╗{RESET}"
-    def bot():  return f"{colour}╚{'═' * inner}╝{RESET}"
-    def sep():  return f"{colour}╠{'═' * inner}╣{RESET}"
+    def top(): return f"{colour}╔{'═' * inner}╗{RESET}"
+    def bot(): return f"{colour}╚{'═' * inner}╝{RESET}"
 
-    def row(plain: str, colored: str = ""):
-        """plain = visible text for width calc; colored = what to actually emit."""
-        pad  = max(0, inner - len(plain))
-        body = colored if colored else plain
-        return f"{colour}║{RESET}{body}{' ' * pad}{colour}║{RESET}"
+    def row(lp: str, lc: str, rp: str, rc: str = "") -> str:
+        """lp/rp = plain (for width); lc/rc = colored (to emit)."""
+        rpad = max(0, right_w - len(rp))
+        body = lc + (rc if rc else rp) + " " * rpad
+        return f"{colour}║{RESET}{body}{colour}║{RESET}"
 
-    lines = [top()]
-
-    # ── logo + title header ───────────────────────────────────────────────────
-    title_col   = _LOGO_W + 2          # column where "SPOTIFY" starts
-    right_space = inner - title_col
-    for i, logo_line in enumerate(_SPOTIFY_LOGO):
-        if i == 1:
-            label_plain  = " SPOTIFY"
-            label_colored = f" {BOLD}SPOTIFY{RESET}"
-        elif i == 2:
-            label_plain  = " Now Playing"
-            label_colored = f" {DIM}Now Playing{RESET}"
-        else:
-            label_plain = label_colored = ""
-        plain   = logo_line + label_plain
-        colored = f"{GREEN}{logo_line}{RESET}" + label_colored
-        lines.append(row(plain, colored))
-
-    lines.append(sep())
-
-    # ── content ───────────────────────────────────────────────────────────────
+    # ── build right-column lines depending on state ───────────────────────────
+    right_rows: list[tuple[str, str]] = []
     if not connected:
-        lines.append(row("  Not connected",
-                         f"  {DIM}Not connected{RESET}"))
-        lines.append(row("  Use /connect-spotify to authenticate",
-                         f"  {DIM}Use /connect-spotify to authenticate{RESET}"))
+        right_rows = [
+            ("", ""),
+            (f" Not connected",      f" {DIM}Not connected{RESET}"),
+            (f" /connect-spotify",   f" {DIM}/connect-spotify{RESET}"),
+        ]
     elif track is None:
-        lines.append(row("  Nothing playing",
-                         f"  {DIM}Nothing playing{RESET}"))
+        right_rows = [
+            ("", ""),
+            (f" Nothing playing",    f" {DIM}Nothing playing{RESET}"),
+        ]
     else:
         status = "▶" if track["is_playing"] else "⏸"
-        title  = _t(track["title"],  inner - 5)
-        artist = _t(track["artist"], inner - 3)
-        album  = _t(track["album"],  inner - 3)
+        title  = _t(track["title"],  right_w - 4)
+        artist = _t(track["artist"], right_w - 2)
+        album  = _t(track["album"],  right_w - 2)
         prog   = track["progress_ms"]
         dur    = track["duration_ms"]
-
-        lines.append(row(f"  {status} {title}",
-                         f"  {GREEN}{status}{RESET} {BOLD}{title}{RESET}"))
-        lines.append(row(f"  {artist}",
-                         f"  {DIM}{artist}{RESET}"))
-        if album:
-            lines.append(row(f"  {album}",
-                             f"  {DIM}{album}{RESET}"))
-
         p_str  = f"{prog // 60000}:{(prog // 1000) % 60:02d}"
         d_str  = f"{dur  // 60000}:{(dur  // 1000) % 60:02d}"
         time_s = f"{p_str}/{d_str}"
-        bar_w  = max(4, inner - len(time_s) - 5)
+        bar_w  = max(4, right_w - len(time_s) - 3)
         filled = int((prog / dur) * bar_w)
-        lines.append(row(
-            f"  {'█' * filled}{'░' * (bar_w - filled)} {time_s}",
-            f"  {GREEN}{'█' * filled}{'░' * (bar_w - filled)}{RESET} {DIM}{time_s}{RESET}",
-        ))
+        bar_p  = f" {'█' * filled}{'░' * (bar_w - filled)} {time_s}"
+        bar_c  = f" {GREEN}{'█' * filled}{'░' * (bar_w - filled)}{RESET} {DIM}{time_s}{RESET}"
+        right_rows = [
+            ("", ""),
+            (f" {status} {title}",   f" {GREEN}{status}{RESET} {BOLD}{title}{RESET}"),
+            (f"  {artist}",          f"  {DIM}{artist}{RESET}"),
+        ]
+        if album:
+            right_rows.append((f"  {album}", f"  {DIM}{album}{RESET}"))
+        right_rows.append((bar_p, bar_c))
+
+    # ── assemble rows: logo rows (0-6) + label row (7) ────────────────────────
+    n_logo  = len(_SPOTIFY_BRAILLE)          # 7
+    n_total = max(n_logo + 1, len(right_rows))
+    lines   = [top()]
+
+    for i in range(n_total):
+        # left column
+        if i < n_logo:
+            lp = " " + _SPOTIFY_BRAILLE[i] + " "
+            lc = f" {GREEN}{_SPOTIFY_BRAILLE[i]}{RESET} "
+        elif i == n_logo:
+            label = f"{'Spotify':^{_BRAILLE_W}}"   # "   Spotify   " (13 chars)
+            lp = " " + label + " "
+            lc = f" {BOLD}{GREEN}{label}{RESET} "
+        else:
+            lp = " " * _LEFT_COL
+            lc = lp
+
+        # right column
+        rp, rc = right_rows[i] if i < len(right_rows) else ("", "")
+
+        lines.append(row(lp, lc, rp, rc))
 
     lines.append(bot())
     return "\n".join(lines) + "\n"
