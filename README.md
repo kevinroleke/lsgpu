@@ -5,17 +5,17 @@ Minimal CLI tool for displaying connected GPUs
 ## Installing
 uv:
 ```
-uv tool install lsgpu
+uv tool install gpufetch
 ```
 pipx:
 ```
-pipx install lsgpu
+pipx install gpufetch
 ```
 
 ## Usage
 ```
-:: ~/ » lsgpu --help
-usage: lsgpu [-h] [--theme NAME] [--entities a,b,c] [--entities-random N] [--fire] [--connect-spotify] [--spotify] [--sysinfo] [--weather] [--eightball] [--play GAME]
+:: ~/ » gpufetch --help
+usage: gpufetch [-h] [--theme NAME] [--entities a,b,c] [--entities-random N] [--fire] [--connect-spotify] [--spotify] [--sysinfo] [--weather] [--eightball] [--play GAME]
 
 List connected GPUs
 
