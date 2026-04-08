@@ -442,6 +442,65 @@ def render_spotify_widget(
     return "\n".join(lines) + "\n"
 
 
+def _render_widgets(
+    sysinfo_enabled: bool, sysinfo_data: "dict | None",
+    weather_enabled: bool, weather_data: "dict | None",
+    spotify_enabled: bool, track: "dict | None", spotify_connected: bool,
+    eightball_enabled: bool, eightball_resp: "tuple | None",
+    term_cols: int,
+) -> str:
+    """Render all active widgets, tiling them side-by-side when space allows."""
+    # Build list of (render_fn, captured_args) — use default args to avoid closure issues
+    fns = []
+    if sysinfo_enabled:
+        fns.append(lambda w, d=sysinfo_data:  render_sysinfo_widget(d, w))
+    if weather_enabled:
+        fns.append(lambda w, d=weather_data:  render_weather_widget(d, w))
+    if spotify_enabled:
+        fns.append(lambda w, t=track, c=spotify_connected:
+                   render_spotify_widget(t, c, w))
+    if eightball_enabled:
+        fns.append(lambda w, r=eightball_resp: render_eightball_widget(r, w))
+
+    if not fns:
+        return ""
+
+    n   = len(fns)
+    gap = 2
+    min_w = 46   # narrowest a widget still looks good at
+
+    # How many columns can we fit?
+    cols = max(1, min(n, (term_cols + gap) // (min_w + gap)))
+    widget_w = (term_cols - (cols - 1) * gap) // cols
+
+    rendered = [fn(widget_w) for fn in fns]
+
+    if cols == 1:
+        return "".join(rendered)
+
+    # Tile in rows of `cols`
+    out_lines: list[str] = []
+    for row_start in range(0, n, cols):
+        batch  = rendered[row_start:row_start + cols]
+        split  = [r.rstrip("\n").split("\n") for r in batch]
+        max_h  = max(len(wl) for wl in split)
+        widths = [max((len(strip_ansi(l)) for l in wl if l), default=widget_w)
+                  for wl in split]
+        padded = [wl + [""] * (max_h - len(wl)) for wl in split]
+
+        for li in range(max_h):
+            parts: list[str] = []
+            for j, (wl, ww) in enumerate(zip(padded, widths)):
+                line = wl[li] if li < len(wl) else ""
+                vis  = len(strip_ansi(line))
+                parts.append(line + " " * max(0, ww - vis))
+                if j < len(batch) - 1:
+                    parts.append(" " * gap)
+            out_lines.append("".join(parts))
+
+    return "\n".join(out_lines) + "\n"
+
+
 def render_cmd_footer(term_cols: int, cmd_buf: str, error: str = "") -> str:
     line = f"{CYAN}{'─' * term_cols}{RESET}"
     if error:
@@ -748,32 +807,37 @@ def execute_command(
         return _ok(entities=new_ents, entity_specs=entity_specs + [spec] * qty)
 
     elif name == "fire":
-        if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
-            return "usage: fire <on|off>"
-        return _ok(fire_enabled=parts[1].lower() == "on")
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(fire_enabled=val == "on")
+        if val is not None:       return "usage: fire [on|off]"
+        return _ok(fire_enabled=not fire_enabled)
 
     elif name == "spotify":
-        if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
-            return "usage: spotify <on|off>"
-        return _ok(spotify_enabled=parts[1].lower() == "on")
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(spotify_enabled=val == "on")
+        if val is not None:       return "usage: spotify [on|off]"
+        return _ok(spotify_enabled=not spotify_enabled)
 
     elif name == "connect-spotify":
         return "__CONNECT_SPOTIFY__"
 
     elif name == "sysinfo":
-        if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
-            return "usage: sysinfo <on|off>"
-        return _ok(sysinfo_enabled=parts[1].lower() == "on")
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(sysinfo_enabled=val == "on")
+        if val is not None:       return "usage: sysinfo [on|off]"
+        return _ok(sysinfo_enabled=not sysinfo_enabled)
 
     elif name == "weather":
-        if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
-            return "usage: weather <on|off>"
-        return _ok(weather_enabled=parts[1].lower() == "on")
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(weather_enabled=val == "on")
+        if val is not None:       return "usage: weather [on|off]"
+        return _ok(weather_enabled=not weather_enabled)
 
     elif name == "eightball":
-        if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
-            return "usage: eightball <on|off>"
-        return _ok(eightball_enabled=parts[1].lower() == "on")
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(eightball_enabled=val == "on")
+        if val is not None:       return "usage: eightball [on|off]"
+        return _ok(eightball_enabled=not eightball_enabled)
 
     elif name == "8ball":
         question = " ".join(parts[1:]) if len(parts) > 1 else "?"
@@ -804,6 +868,46 @@ def execute_command(
                 "try: help, change-theme, change-theme-random, killall, kill, spawn, "
                 "fire, spotify, connect-spotify, sysinfo, weather, eightball, 8ball, "
                 "play, keybind")
+
+
+# ── Tab-completion tables ─────────────────────────────────────────────────────
+
+_ALL_COMMANDS = sorted([
+    "change-theme", "change-theme-random", "killall", "kill", "spawn",
+    "fire", "spotify", "connect-spotify", "sysinfo", "weather",
+    "eightball", "8ball", "play", "keybind", "help",
+])
+
+def _tab_completions(cmd_buf: str) -> list[str]:
+    """Return sorted completion candidates for the current cmd_buf."""
+    parts = cmd_buf.split(" ", 1)
+    cmd   = parts[0]
+    # Complete command name
+    if len(parts) == 1:
+        return [c for c in _ALL_COMMANDS if c.startswith(cmd)]
+    # Complete first argument
+    arg_prefix = parts[1]
+    pools: dict[str, list[str]] = {
+        "change-theme":  list(THEME_REGISTRY),
+        "spawn":         list(ENTITY_REGISTRY),
+        "kill":          list(ENTITY_REGISTRY),
+        "play":          list(_GAMES),
+        "fire":          ["on", "off"],
+        "spotify":       ["on", "off"],
+        "sysinfo":       ["on", "off"],
+        "weather":       ["on", "off"],
+        "eightball":     ["on", "off"],
+    }
+    pool = pools.get(cmd, [])
+    return [x for x in pool if x.startswith(arg_prefix)]
+
+
+def _apply_completion(cmd_buf: str, candidate: str) -> str:
+    """Replace the completable token in cmd_buf with candidate."""
+    if " " not in cmd_buf:
+        return candidate + " "
+    head, _ = cmd_buf.split(" ", 1)
+    return head + " " + candidate + " "
 
 
 def _read_key(fd: int, timeout: float) -> str:
@@ -866,6 +970,8 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
     eightball_flash: int = 0
     show_help: bool = False
     _keybinds: dict[str, str] = {}
+    tab_candidates: list[str] = []
+    tab_idx: int = 0
 
     def _ensure_poller():
         nonlocal spotify_poller
@@ -937,21 +1043,12 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
             header   = theme.apply(render_header(gpus, term.columns, frame), frame)
             grid     = theme.apply(render_grid(gpus,   term.columns, frame), frame)
 
-            sysinfo_box = (
-                render_sysinfo_widget(sysinfo_poller.get(), term.columns)
-                if sysinfo_enabled else ""
-            )
-            weather_box = (
-                render_weather_widget(weather_poller.get(), term.columns)
-                if weather_enabled else ""
-            )
-            spotify_box = (
-                render_spotify_widget(track, spotify_client.is_connected(), term.columns)
-                if spotify_enabled else ""
-            )
-            eightball_box = (
-                render_eightball_widget(eightball_response, term.columns)
-                if eightball_enabled else ""
+            widget_block = _render_widgets(
+                sysinfo_enabled,  sysinfo_poller.get() if sysinfo_poller else None,
+                weather_enabled,  weather_poller.get() if weather_poller else None,
+                spotify_enabled,  track, spotify_client.is_connected(),
+                eightball_enabled, eightball_response,
+                term.columns,
             )
 
             if cmd_mode:
@@ -959,11 +1056,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
             else:
                 footer = theme.apply(render_footer(term.columns, poll_age), frame)
 
-            grid_part = (
-                "\033[H" + header + grid
-                + sysinfo_box + weather_box + spotify_box + eightball_box
-                + "\033[J"
-            )
+            grid_part = "\033[H" + header + grid + widget_block + "\033[J"
             footer_part = (
                 f"\033[{term.lines - 1};1H"
                 + footer
@@ -1049,17 +1142,32 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                         cmd_mode = False
                         cmd_buf  = cmd_error = ""
                 elif ch == "\x1b":
-                    cmd_mode = False
-                    cmd_buf  = cmd_error = ""
+                    cmd_mode       = False
+                    cmd_buf        = cmd_error = ""
+                    tab_candidates = []
+                elif ch == "\t":
+                    # Tab completion — cycle through candidates
+                    candidates = _tab_completions(cmd_buf)
+                    if candidates:
+                        if candidates != tab_candidates:
+                            tab_candidates = candidates
+                            tab_idx        = 0
+                        else:
+                            tab_idx = (tab_idx + 1) % len(tab_candidates)
+                        cmd_buf   = _apply_completion(cmd_buf, tab_candidates[tab_idx])
+                        cmd_error = ""
                 elif ch in ("\x7f", "\x08"):
-                    cmd_buf   = cmd_buf[:-1]
-                    cmd_error = ""
+                    cmd_buf        = cmd_buf[:-1]
+                    cmd_error      = ""
+                    tab_candidates = []
                 elif ch == "\x15":
-                    cmd_buf   = ""
-                    cmd_error = ""
+                    cmd_buf        = ""
+                    cmd_error      = ""
+                    tab_candidates = []
                 elif ch and ch.isprintable():
-                    cmd_buf  += ch
-                    cmd_error = ""
+                    cmd_buf        += ch
+                    cmd_error      = ""
+                    tab_candidates = []
             else:
                 if show_help:
                     # A real keypress (not a timeout) dismisses the help overlay
