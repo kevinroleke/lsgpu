@@ -25,6 +25,17 @@ from spotify import SpotifyClient, SpotifyPoller
 from sysinfo import SysinfoPoller, render_sysinfo_widget
 from weather import WeatherPoller, render_weather_widget
 from eightball import random_response, render_eightball_widget, render_eightball_overlay
+import game_wordle
+import game_snake
+import game_dino
+import game_roulette
+
+_GAMES = {
+    "wordle":   game_wordle.play,
+    "snake":    game_snake.play,
+    "dino":     game_dino.play,
+    "roulette": game_roulette.play,
+}
 
 
 # ── GPU ASCII art templates ───────────────────────────────────────────────────
@@ -620,10 +631,18 @@ def execute_command(
         question = " ".join(parts[1:]) if len(parts) > 1 else "?"
         return ("__8BALL__", question, random_response())
 
+    elif name == "play":
+        if len(parts) < 2:
+            return f"usage: play <game>  known: {', '.join(_GAMES)}"
+        game = parts[1].lower()
+        if game not in _GAMES:
+            return f"unknown game {game!r}  known: {', '.join(_GAMES)}"
+        return ("__PLAY__", game)
+
     else:
         return (f"unknown command {name!r}  "
                 "try: change-theme, change-theme-random, killall, kill, spawn, "
-                "fire, spotify, connect-spotify, sysinfo, weather, eightball, 8ball")
+                "fire, spotify, connect-spotify, sysinfo, weather, eightball, 8ball, play")
 
 
 def _read_key(fd: int, timeout: float) -> str:
@@ -821,6 +840,18 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                         input("\nPress Enter to return to lsgpu…")
                         old = termios.tcgetattr(fd)
                         _tui_enter(fd)
+                        cmd_mode = False
+                        cmd_buf  = cmd_error = ""
+                    elif isinstance(result, tuple) and result[0] == "__PLAY__":
+                        _, game_name = result
+                        # Hand off to the game; it runs until it returns
+                        sys.stdout.write("\033[2J\033[H")
+                        sys.stdout.flush()
+                        _GAMES[game_name](fd, term.columns, term.lines)
+                        # Redraw the full TUI on return
+                        sys.stdout.write("\033[2J\033[H")
+                        sys.stdout.flush()
+                        spawned  = False   # re-spawn entities after game
                         cmd_mode = False
                         cmd_buf  = cmd_error = ""
                     elif isinstance(result, tuple) and result[0] == "__8BALL__":
