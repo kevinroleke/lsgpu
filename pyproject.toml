@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gpufetch"
-version = "0.1.0"
-description = "GPU monitor TUI with ASCII art, games, and widgets"
+version = "0.2.0"
+description = "A minimal GPU monitor for your terminal"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

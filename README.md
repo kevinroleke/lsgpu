@@ -1,5 +1,5 @@
 <h1 align="center">gpufetch</h1>
-<p align="center"><i align="center">A minimal CLI tool for displaying connected GPUs</i></p>
+<p align="center"><i align="center">A minimal GPU monitor for your terminal</i></p>
 
 ---
 
