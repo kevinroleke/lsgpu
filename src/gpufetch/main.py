@@ -26,6 +26,7 @@ from .sysinfo import SysinfoPoller, render_sysinfo_widget
 from .weather import WeatherPoller, render_weather_widget
 from .eightball import random_response, render_eightball_widget, render_eightball_overlay
 from .prices import GpuPricePoller, get_price
+from .debt import DebtPoller, render_debt_widget
 from . import game_wordle
 from . import game_snake
 from . import game_roulette
@@ -457,6 +458,7 @@ def _render_widgets(
     sysinfo_enabled: bool, sysinfo_data: "dict | None",
     weather_enabled: bool, weather_data: "dict | None",
     spotify_enabled: bool, track: "dict | None", spotify_connected: bool,
+    debt_enabled: bool, debt_data: "dict | None",
     term_cols: int,
 ) -> str:
     """Render all active widgets, tiling them side-by-side when space allows."""
@@ -469,6 +471,8 @@ def _render_widgets(
     if spotify_enabled:
         fns.append(lambda w, t=track, c=spotify_connected:
                    render_spotify_widget(t, c, w))
+    if debt_enabled:
+        fns.append(lambda w, d=debt_data: render_debt_widget(d, w))
 
     if not fns:
         return ""
@@ -593,6 +597,7 @@ def render_help_overlay(term_cols: int, term_lines: int,
         ("connect-spotify",        "OAuth login for Spotify"),
         ("sysinfo on|off",         "CPU/memory widget"),
         ("weather on|off",         "weather widget (Rochester NY)"),
+        ("debt on|off",            "US national debt clock"),
         ("8ball [question]",       "shake the 8-ball"),
         ("play <game>",            "launch a game"),
         ("keybind <key> <cmd…>",   "bind a key to a command"),
@@ -748,6 +753,7 @@ def execute_command(
     spotify_enabled: bool,
     sysinfo_enabled: bool,
     weather_enabled: bool,
+    debt_enabled: bool,
     term_cols: int,
     term_lines: int,
 ) -> "tuple | str":
@@ -755,7 +761,7 @@ def execute_command(
     parts = cmd.split()
     if not parts:
         return (theme, entities, entity_specs, fire_enabled, spotify_enabled,
-                sysinfo_enabled, weather_enabled)
+                sysinfo_enabled, weather_enabled, debt_enabled)
     name = parts[0].lower()
 
     def _ok(**kw):
@@ -767,6 +773,7 @@ def execute_command(
             kw.get("spotify_enabled", spotify_enabled),
             kw.get("sysinfo_enabled", sysinfo_enabled),
             kw.get("weather_enabled", weather_enabled),
+            kw.get("debt_enabled",    debt_enabled),
         )
 
     if name == "change-theme":
@@ -838,6 +845,12 @@ def execute_command(
         if val is not None:       return "usage: weather [on|off]"
         return _ok(weather_enabled=not weather_enabled)
 
+    elif name == "debt":
+        val = parts[1].lower() if len(parts) >= 2 else None
+        if val in ("on", "off"):  return _ok(debt_enabled=val == "on")
+        if val is not None:       return "usage: debt [on|off]"
+        return _ok(debt_enabled=not debt_enabled)
+
     elif name == "8ball":
         question = " ".join(parts[1:]) if len(parts) > 1 else "?"
         return ("__8BALL__", question, random_response())
@@ -865,7 +878,7 @@ def execute_command(
     else:
         return (f"unknown command {name!r}  "
                 "try: help, change-theme, change-theme-random, killall, kill, spawn, "
-                "fire, spotify, connect-spotify, sysinfo, weather, 8ball, "
+                "fire, spotify, connect-spotify, sysinfo, weather, debt, 8ball, "
                 "play, keybind")
 
 
@@ -873,7 +886,7 @@ def execute_command(
 
 _ALL_COMMANDS = sorted([
     "change-theme", "change-theme-random", "killall", "kill", "spawn",
-    "fire", "spotify", "connect-spotify", "sysinfo", "weather",
+    "fire", "spotify", "connect-spotify", "sysinfo", "weather", "debt",
     "8ball", "play", "keybind", "help",
 ])
 
@@ -895,6 +908,7 @@ def _tab_completions(cmd_buf: str) -> list[str]:
         "spotify":       ["on", "off"],
         "sysinfo":       ["on", "off"],
         "weather":       ["on", "off"],
+        "debt":          ["on", "off"],
     }
     pool = pools.get(cmd, [])
     return [x for x in pool if x.startswith(arg_prefix)]
@@ -940,7 +954,8 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
             fire_enabled: bool = False,
             spotify_enabled: bool = False,
             sysinfo_enabled: bool = False,
-            weather_enabled: bool = False) -> None:
+            weather_enabled: bool = False,
+            debt_enabled: bool = False) -> None:
     fd  = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
 
@@ -963,6 +978,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
     sysinfo_poller:  "SysinfoPoller  | None" = None
     weather_poller:  "WeatherPoller  | None" = None
     price_poller:    "GpuPricePoller | None" = None
+    debt_poller:     "DebtPoller     | None" = None
     eightball_response: "tuple[str, str] | None" = None
     eightball_question: str = ""
     eightball_flash: int = 0
@@ -1036,6 +1052,11 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
             _ensure_weather()
             if not weather_enabled:
                 _stop_weather()
+            if debt_enabled and debt_poller is None:
+                debt_poller = DebtPoller()
+            elif not debt_enabled and debt_poller is not None:
+                debt_poller.stop()
+                debt_poller = None
 
             track = spotify_poller.get() if spotify_poller else None
 
@@ -1047,6 +1068,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                 sysinfo_enabled,  sysinfo_poller.get() if sysinfo_poller else None,
                 weather_enabled,  weather_poller.get() if weather_poller else None,
                 spotify_enabled,  track, spotify_client.is_connected(),
+                debt_enabled, debt_poller.get() if debt_poller else None,
                 term.columns,
             )
 
@@ -1088,7 +1110,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     result = execute_command(
                         cmd_buf.strip(), theme, entities, entity_specs,
                         fire_enabled, spotify_enabled,
-                        sysinfo_enabled, weather_enabled,
+                        sysinfo_enabled, weather_enabled, debt_enabled,
                         term.columns, term.lines,
                     )
                     if result == "__CONNECT_SPOTIFY__":
@@ -1133,7 +1155,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     else:
                         (theme, entities, entity_specs,
                          fire_enabled, spotify_enabled,
-                         sysinfo_enabled, weather_enabled) = result
+                         sysinfo_enabled, weather_enabled, debt_enabled) = result
                         if fire_enabled and (not fire_buf or fire_width != term.columns):
                             fire_buf   = fire_init(term.columns)
                             fire_width = term.columns
@@ -1180,7 +1202,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     result = execute_command(
                         _keybinds[ch], theme, entities, entity_specs,
                         fire_enabled, spotify_enabled,
-                        sysinfo_enabled, weather_enabled,
+                        sysinfo_enabled, weather_enabled, debt_enabled,
                         term.columns, term.lines,
                     )
                     if result == "__HELP__":
@@ -1202,7 +1224,7 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
                     elif not isinstance(result, str):
                         (theme, entities, entity_specs,
                          fire_enabled, spotify_enabled,
-                         sysinfo_enabled, weather_enabled) = result
+                         sysinfo_enabled, weather_enabled, debt_enabled) = result
                         if fire_enabled and (not fire_buf or fire_width != term.columns):
                             fire_buf   = fire_init(term.columns)
                             fire_width = term.columns
@@ -1215,6 +1237,8 @@ def run_tui(theme: Theme, entity_specs: list[EntitySpec],
         _stop_weather()
         if price_poller is not None:
             price_poller.stop()
+        if debt_poller is not None:
+            debt_poller.stop()
         _tui_exit(fd, old)
 
 
@@ -1246,6 +1270,8 @@ def main() -> None:
                         help="show CPU/memory usage widget")
     parser.add_argument("--weather", action="store_true",
                         help="show weather widget for Rochester, NY")
+    parser.add_argument("--debt", action="store_true",
+                        help="show US national debt clock widget")
     parser.add_argument("--play", metavar="GAME", default="",
                         help=f"jump straight into a game: {', '.join(_GAMES)}")
     args = parser.parse_args()
@@ -1292,7 +1318,8 @@ def main() -> None:
                 fire_enabled=args.fire,
                 spotify_enabled=args.spotify,
                 sysinfo_enabled=args.sysinfo,
-                weather_enabled=args.weather)
+                weather_enabled=args.weather,
+                debt_enabled=args.debt)
     else:
         term   = shutil.get_terminal_size(fallback=(80, 24))
         gpus   = collect_gpus()
