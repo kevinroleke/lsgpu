@@ -7,44 +7,6 @@
 
 ---
 
-## Features
-
-**GPU cards**
-- Live VRAM usage bar, utilisation %, temperature, driver version, PCIe width
-- eBay sold-listing median price fetched in the background for each detected GPU
-- NVIDIA and AMD vendor colours; ASCII art PCB art inside each card
-
-**Widgets** (toggle with `--flag` or `/command` at runtime)
-| Flag | Command | What it shows |
-|---|---|---|
-| `--sysinfo` | `/sysinfo` | CPU usage bar, RAM and swap bars |
-| `--weather` | `/weather` | Temperature, conditions, wind, hourly forecast (wttr.in) |
-| `--spotify` | `/spotify` | Now-playing track, artist, progress bar |
-| `--debt` | `/debt` | US national debt counter ticking in real time |
-| `--tickers` | `/tickers` | BTC/USD, XMR/USD, S&P 500, NVDA with 24 h change % |
-
-Multiple widgets tile side-by-side automatically when the terminal is wide enough.
-
-**Entities** — ASCII art characters that bounce around the screen  
-`anime_girl` `arch` `bible_quote` `bill_100` `crab` `debian` `dvd` `empty_wallet` `ethereum` `fedora` `ghost` `gorilla` `greeting` `grim_reaper` `jesus` `jewish_star` `marge` `maui` `nuke` `nvidia` `rxknephew` `scrooge` `shadow_wizard` `ship` `slot_machine` `stuffed_wallet` `trophy` `tux` `ufo`
-
-**Themes** — recolour the entire UI  
-`default` `america` `canada` `china` `christmas` `420` `halloween` `israel` `matrix` `rainbow`
-
-**Games** (launch with `--play <name>` or `/play <name>`)
-- `wordle` — full NYT word list
-- `snake`
-- `roulette`
-- `blackjack` — 6-deck shoe, 3:2 blackjack, double down
-
-**Other**
-- `/fire` — fire animation along the bottom
-- `/8ball <question>` — Magic 8-ball overlay
-- `/keybind <key> <command>` — bind any command to a single key
-- `/change-theme <name>` / `/change-theme-random`
-
----
-
 ## Installing
 
 uv:
@@ -78,6 +40,43 @@ options:
 
 TUI keys: / → command prompt   q → quit   /help → command list
 ```
+---
+
+## Features
+
+**GPU cards**
+- Live VRAM usage bar, utilisation %, temperature, driver version, PCIe width
+- eBay sold-listing median price fetched in the background for each detected GPU
+- NVIDIA and AMD vendor colours; ASCII art PCB art inside each card
+
+**Widgets** (toggle with `--flag` or `/command` at runtime)
+| Flag | Command | What it shows |
+|---|---|---|
+| `--sysinfo` | `/sysinfo` | CPU usage bar, RAM and swap bars |
+| `--weather` | `/weather` | Temperature, conditions, wind, hourly forecast (wttr.in) |
+| `--spotify` | `/spotify` | Now-playing track, artist, progress bar |
+| `--debt` | `/debt` | US national debt counter ticking in real time |
+| `--tickers` | `/tickers` | BTC/USD, XMR/USD, S&P 500, NVDA with 24 h change % |
+
+Multiple widgets tile side-by-side automatically when the terminal is wide enough.
+
+**Entities** — ASCII art characters that bounce around the screen
+`anime_girl` `arch` `bible_quote` `bill_100` `crab` `debian` `dvd` `empty_wallet` `ethereum` `fedora` `ghost` `gorilla` `greeting` `grim_reaper` `jesus` `jewish_star` `marge` `maui` `nuke` `nvidia` `rxknephew` `scrooge` `shadow_wizard` `ship` `slot_machine` `stuffed_wallet` `trophy` `tux` `ufo`
+
+**Themes** — recolour the entire UI
+`default` `america` `canada` `china` `christmas` `420` `halloween` `israel` `matrix` `rainbow`
+
+**Games** (launch with `--play <name>` or `/play <name>`)
+- `wordle`
+- `snake`
+- `roulette`
+- `blackjack`
+
+**Other**
+- `/fire` - fire animation along the bottom
+- `/8ball <question>` - Magic 8-ball overlay
+- `/keybind <key> <command>` - bind any command to a single key
+- `/change-theme <name>` / `/change-theme-random`
 
 ---
 
@@ -86,8 +85,8 @@ TUI keys: / → command prompt   q → quit   /help → command list
 **Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
-git clone https://github.com/kevinroleke/lsgpu
-cd lsgpu
+git clone https://github.com/kevinroleke/gpufetch
+cd gpufetch
 
 # Run directly from source (no install step needed)
 uv run -m gpufetch
